@@ -19,7 +19,7 @@ import "@chainlink/contracts/src/v0.8/KeeperCompatible.sol";
 // and will not work on any test or main livenets.
 import "hardhat/console.sol";
 
-contract BullBear is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable {
+contract BullBear is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, KeeperCompatibleInterface {
     using Counters for Counters.Counter;
 
     Counters.Counter private _tokenIdCounter;
@@ -28,17 +28,29 @@ contract BullBear is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable {
     // NOTE: These connect to my IPFS Companion node.
     // You should upload the contents of the /ipfs folder to your own node for development.
     string[] bullUrisIpfs = [
-        "https://ipfs.io/ipfs/QmRXyfi3oNZCubDxiVFre3kLZ8XeGt6pQsnAQRZ7akhSNs?filename=gamer_bull.json",
-        "https://ipfs.io/ipfs/QmRJVFeMrtYS2CUVUM2cHJpBV5aX2xurpnsfZxLTTQbiD3?filename=party_bull.json",
-        "https://ipfs.io/ipfs/QmdcURmN1kEEtKgnbkVJJ8hrmsSWHpZvLkRgsKKoiWvW9g?filename=simple_bull.json"
+    "https://bullbear.s3.filebase.com/gamer_bull.json",
+    "https://bullbear.s3.filebase.com/party_bull.json",
+    "https://bullbear.s3.filebase.com/simple_bull.json"
     ];
     string[] bearUrisIpfs = [
-        "https://ipfs.io/ipfs/Qmdx9Hx7FCDZGExyjLR6vYcnutUR8KhBZBnZfAPHiUommN?filename=beanie_bear.json",
-        "https://ipfs.io/ipfs/QmTVLyTSuiKGUEmb88BgXG3qNC8YgpHZiFbjHrXKH3QHEu?filename=coolio_bear.json",
-        "https://ipfs.io/ipfs/QmbKhBXVWmwrYsTPFYfroR2N7NAekAMxHUVg2CWks7i9qj?filename=simple_bear.json"
+    "https://bullbear.s3.filebase.com/beanie_bear.json",
+    "https://bullbear.s3.filebase.com/coolio_bear.json",
+    "https://bullbear.s3.filebase.com/simple_bear.json"
     ];
 
-    constructor() ERC721("Bull&Bear", "BBTK") {}
+    constructor(uint updateInterval, address _pricefeed) ERC721("Bull&Bear", "BBTK") {
+        // Set the keeper update interval
+        interval = updateInterval;
+        lastTimeStamp = block.timestamp;  //  seconds since unix epoch
+
+        // set the price feed address to
+        // BTC/USD Price Feed Contract Address on Rinkeby: https://rinkeby.etherscan.io/address/0xECe365B379E1dD183B20fc5f022230C044d51404
+        // or the MockPriceFeed Contract
+        pricefeed = AggregatorV3Interface(_pricefeed); // To pass in the mock
+
+        // set the price for the chosen currency pair.
+        currentPrice = getLatestPrice();
+    }
 
     function safeMint(address to) public {
         // Current counter value will be the minted token's token ID.
@@ -72,27 +84,65 @@ contract BullBear is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable {
     }
 
     function _burn(uint256 tokenId)
-        internal
-        override(ERC721, ERC721URIStorage)
+    internal
+    override(ERC721, ERC721URIStorage)
     {
         super._burn(tokenId);
     }
 
     function tokenURI(uint256 tokenId)
-        public
-        view
-        override(ERC721, ERC721URIStorage)
-        returns (string memory)
+    public
+    view
+    override(ERC721, ERC721URIStorage)
+    returns (string memory)
     {
         return super.tokenURI(tokenId);
     }
 
     function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721, ERC721Enumerable)
-        returns (bool)
+    public
+    view
+    override(ERC721, ERC721Enumerable)
+    returns (bool)
     {
         return super.supportsInterface(interfaceId);
+    }
+
+    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory /*performData */) {
+        upkeepNeeded = (block.timestamp - lastTimeStamp) > interval;
+    }
+
+    function performUpkeep(bytes calldata /* performData */ ) external override {
+        //We highly recommend revalidating the upkeep in the performUpkeep function
+        if ((block.timestamp - lastTimeStamp) > interval ) {
+            lastTimeStamp = block.timestamp;
+            int latestPrice =  getLatestPrice();
+
+            if (latestPrice == currentPrice) {
+                console.log("NO CHANGE -> returning!");
+                return;
+            }
+
+            if (latestPrice < currentPrice) {
+                // bear
+                console.log("ITS BEAR TIME");
+                updateAllTokenUris("bear");
+
+            } else {
+                // bull
+                console.log("ITS BULL TIME");
+                updateAllTokenUris("bull");
+            }
+
+            // update currentPrice
+            currentPrice = latestPrice;
+        } else {
+            console.log(
+                " INTERVAL NOT UP!"
+            );
+            return;
+        }
+
+
     }
 }
